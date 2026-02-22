@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+# gh-repo-peek: Quick repo stats at a glance
+set -euo pipefail
+
+VERSION="0.1.0"
+
+usage() {
+  echo "Usage: gh repo-peek [owner/repo]"
+  echo ""
+  echo "Quick stats for any GitHub repo."
+  echo ""
+  echo "If no repo is given, uses the current directory's repo."
+  echo ""
+  echo "Flags:"
+  echo "  -h, --help     Show help"
+  echo "  -v, --version  Show version"
+}
+
+# Parse flags
+case "${1:-}" in
+  -h|--help) usage; exit 0 ;;
+  -v|--version) echo "gh-repo-peek $VERSION"; exit 0 ;;
+esac
+
+REPO="${1:-}"
+
+# If no repo given, detect from git remote
+if [[ -z "$REPO" ]]; then
+  REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null || true)
+  if [[ -z "$REPO" ]]; then
+    echo "Error: not in a git repo and no repo specified" >&2
+    exit 1
+  fi
+fi
+
+# Colors
+BOLD='\033[1m'
+CYAN='\033[36m'
+YELLOW='\033[33m'
+GREEN='\033[32m'
+MAGENTA='\033[35m'
+DIM='\033[2m'
+RESET='\033[0m'
+
+# Fetch repo data
+DATA=$(gh api "repos/$REPO" 2>/dev/null) || { echo "Error: could not fetch $REPO" >&2; exit 1; }
+
+# Parse fields
+NAME=$(echo "$DATA" | jq -r '.full_name')
+DESC=$(echo "$DATA" | jq -r '.description // "No description"')
+STARS=$(echo "$DATA" | jq -r '.stargazers_count')
+FORKS=$(echo "$DATA" | jq -r '.forks_count')
+ISSUES=$(echo "$DATA" | jq -r '.open_issues_count')
+LANG=$(echo "$DATA" | jq -r '.language // "Unknown"')
+LICENSE=$(echo "$DATA" | jq -r '.license.spdx_id // "None"')
+UPDATED=$(echo "$DATA" | jq -r '.pushed_at' | cut -dT -f1)
+ARCHIVED=$(echo "$DATA" | jq -r '.archived')
+VISIBILITY=$(echo "$DATA" | jq -r 'if .private then "private" else "public" end')
+
+# Top 5 languages
+LANGS=$(gh api "repos/$REPO/languages" 2>/dev/null | jq -r 'to_entries | sort_by(-.value) | .[0:5] | .[] | .key' 2>/dev/null || echo "$LANG")
+
+# Recent activity (last 5 commits)
+COMMITS=$(gh api "repos/$REPO/commits?per_page=5" 2>/dev/null | jq -r '.[] | "  " + (.commit.message | split("\n")[0] | .[0:60]) + " (" + (.commit.author.date | .[0:10]) + ")"' 2>/dev/null || echo "  (could not fetch)")
+
+# Display
+echo ""
+echo -e "${BOLD}${CYAN}  $NAME${RESET}  ${DIM}[$VISIBILITY]${RESET}"
+[[ "$ARCHIVED" == "true" ]] && echo -e "  ${YELLOW}⚠ ARCHIVED${RESET}"
+echo -e "  ${DIM}$DESC${RESET}"
+echo ""
+echo -e "  ${YELLOW}★${RESET} $STARS    ${GREEN}⑂${RESET} $FORKS    ${MAGENTA}◉${RESET} $ISSUES open    ${DIM}⚖${RESET} $LICENSE"
+echo ""
+echo -e "  ${BOLD}Languages:${RESET}"
+while IFS= read -r lang; do
+  echo -e "    ${CYAN}●${RESET} $lang"
+done <<< "$LANGS"
+echo ""
+echo -e "  ${BOLD}Recent commits:${RESET}"
+echo "$COMMITS"
+echo ""
+echo -e "  ${DIM}Last push: $UPDATED${RESET}"
+echo ""

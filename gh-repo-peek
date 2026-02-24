@@ -5,24 +5,32 @@ set -euo pipefail
 VERSION="0.1.0"
 
 usage() {
-  echo "Usage: gh repo-peek [owner/repo]"
+  echo "Usage: gh repo-peek [owner/repo] [flags]"
   echo ""
   echo "Quick stats for any GitHub repo."
   echo ""
   echo "If no repo is given, uses the current directory's repo."
   echo ""
   echo "Flags:"
+  echo "  --json         Output as JSON"
   echo "  -h, --help     Show help"
   echo "  -v, --version  Show version"
 }
 
-# Parse flags
-case "${1:-}" in
-  -h|--help) usage; exit 0 ;;
-  -v|--version) echo "gh-repo-peek $VERSION"; exit 0 ;;
-esac
+JSON_OUTPUT=false
 
-REPO="${1:-}"
+# Parse flags
+POSITIONAL=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help) usage; exit 0 ;;
+    -v|--version) echo "gh-repo-peek $VERSION"; exit 0 ;;
+    --json) JSON_OUTPUT=true; shift ;;
+    *) POSITIONAL+=("$1"); shift ;;
+  esac
+done
+
+REPO="${POSITIONAL[0]:-}"
 
 # If no repo given, detect from git remote
 if [[ -z "$REPO" ]]; then
@@ -62,6 +70,27 @@ LANGS=$(gh api "repos/$REPO/languages" 2>/dev/null | jq -r 'to_entries | sort_by
 
 # Recent activity (last 5 commits)
 COMMITS=$(gh api "repos/$REPO/commits?per_page=5" 2>/dev/null | jq -r '.[] | "  " + (.commit.message | split("\n")[0] | .[0:60]) + " (" + (.commit.author.date | .[0:10]) + ")"' 2>/dev/null || echo "  (could not fetch)")
+
+# JSON output
+if [[ "$JSON_OUTPUT" == "true" ]]; then
+  LANGS_JSON=$(gh api "repos/$REPO/languages" 2>/dev/null | jq 'to_entries | sort_by(-.value) | .[0:5] | [.[].key]' 2>/dev/null || echo "[]")
+  COMMITS_JSON=$(gh api "repos/$REPO/commits?per_page=5" 2>/dev/null | jq '[.[] | {message: (.commit.message | split("\n")[0]), date: (.commit.author.date | .[0:10]), author: .commit.author.name}]' 2>/dev/null || echo "[]")
+  jq -n \
+    --arg name "$NAME" \
+    --arg description "$DESC" \
+    --argjson stars "$STARS" \
+    --argjson forks "$FORKS" \
+    --argjson open_issues "$ISSUES" \
+    --arg language "$LANG" \
+    --arg license "$LICENSE" \
+    --arg last_push "$UPDATED" \
+    --argjson archived "$ARCHIVED" \
+    --arg visibility "$VISIBILITY" \
+    --argjson languages "$LANGS_JSON" \
+    --argjson recent_commits "$COMMITS_JSON" \
+    '{name: $name, description: $description, stars: $stars, forks: $forks, open_issues: $open_issues, language: $language, license: $license, last_push: $last_push, archived: $archived, visibility: $visibility, languages: $languages, recent_commits: $recent_commits}'
+  exit 0
+fi
 
 # Display
 echo ""

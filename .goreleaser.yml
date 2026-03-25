@@ -1,7 +1,7 @@
-project_name: gh-extension-template
+project_name: gh-repo-peek
 
 builds:
-  - binary: gh-extension-template
+  - binary: gh-repo-peek
     goos:
       - darwin
       - linux
